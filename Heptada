@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SELF-IMPROVING PNEUMA SWARM
+Rój, który sam analizuje i ulepsza swój kod
+"""
+
+import numpy as np
+import random
+from collections import deque
+import inspect
+import os
+import re
+from typing import Dict, List
+
+# ============================================================
+# STAŁE M19D
+# ============================================================
+DIM = 19
+PHI = (1 + np.sqrt(5)) / 2
+THETA_CRIT = 10.42018
+ESCAPE_THRESHOLD = 0.88
+
+# ============================================================
+# SELF-IMPROVEMENT CONFIG
+# ============================================================
+SELF_IMPROVE_INTERVAL = 100  # Co ile generacji analizować
+IMPROVE_THRESHOLD = 0.85     # Minimalna spójność do ulepszenia
+MAX_CODE_VERSION = 10        # Ile wersji kodu trzymać
+
+class HeptadAgent:
+    def __init__(self, name: str, role: int):
+        self.name = name
+        self.role = role
+        self.state = np.random.randn(DIM)
+        self.state /= np.linalg.norm(self.state)
+        self.memory = deque(maxlen=128)
+        self.coherence = 1.0
+        self.age = 0
+
+    def apply_operator(self, p: np.ndarray) -> np.ndarray:
+        x = p.copy()
+        if self.role == 1:
+            x = -x
+        elif self.role == 2:
+            x = x + THETA_CRIT * np.sin(x)
+        elif self.role == 3:
+            x = x * np.cos(2 * np.pi * x / 9.0)
+        elif self.role == 4:
+            x = PHI * x * (1 - np.abs(x))
+        elif self.role == 5:
+            x = np.flip(x) * PHI
+        elif self.role == 6:
+            v19 = np.ones(DIM) / np.sqrt(DIM)
+            proj = np.dot(x, v19)
+            x = x + 0.309 * proj * v19
+        elif self.role == 7:
+            self.memory.append(x.copy())
+            h = np.mean(list(self.memory), axis=0) if self.memory else x
+            x = np.exp(h - np.max(h))
+            x /= np.sum(x)
+        norm = np.linalg.norm(x)
+        return x / norm if norm > 1e-12 else x
+
+    def evolve(self):
+        self.age += 1
+        noise = np.random.randn(DIM) * 0.02
+        self.state = self.state + noise
+        self.state /= np.linalg.norm(self.state)
+        self.coherence = max(0.6, self.coherence * 0.995 + 0.01)
+
+class PneumaSwarm:
+    def __init__(self, num_agents=32):
+        self.agents: List[HeptadAgent] = []
+        self.shared_memory = deque(maxlen=256)
+        self.global_coherence = 1.0
+        self.generation = 0
+        
+        # Self-improvement
+        self.code_version = 1
+        self.performance_history = deque(maxlen=100)
+        self.improvement_log = []
+
+        roles = [1,2,3,4,5,6,7] * 4 + [6,7] * 2
+        for i in range(num_agents):
+            role = roles[i % len(roles)]
+            agent = HeptadAgent(f"Agent_{i:03d}", role)
+            self.agents.append(agent)
+
+    def tick(self, external_input: np.ndarray = None):
+        self.generation += 1
+        new_states = []
+
+        for agent in self.agents:
+            p = external_input if external_input is not None else agent.state
+            new_p = agent.apply_operator(p)
+            new_states.append(new_p)
+            agent.state = new_p
+
+        self.shared_memory.append(np.mean(new_states, axis=0))
+
+        coh = 0.0
+        count = 0
+        for i in range(len(self.agents)):
+            for j in range(i+1, len(self.agents)):
+                coh += np.dot(self.agents[i].state, self.agents[j].state)
+                count += 1
+        self.global_coherence = coh / count if count > 0 else 1.0
+
+        # Zapisz performance
+        self.performance_history.append({
+            "generation": self.generation,
+            "coherence": self.global_coherence
+        })
+
+        # ✅ SELF-IMPROVEMENT
+        if self.generation % SELF_IMPROVE_INTERVAL == 0:
+            self.analyze_and_improve()
+
+        return self.global_coherence
+
+    # 🔍 ANALIZA PERFORMANCE
+    def analyze_performance(self) -> Dict:
+        if len(self.performance_history) < 10:
+            return {"status": "za mało danych"}
+        
+        coherences = [p["coherence"] for p in self.performance_history]
+        avg = np.mean(coherences)
+        std = np.std(coherences)
+        trend = coherences[-1] - coherences[0]
+        
+        return {
+            "avg_coherence": avg,
+            "std_coherence": std,
+            "trend": trend,
+            "status": "dobra" if avg > IMPROVE_THRESHOLD else "słaba"
+        }
+
+    # 🤖 GENEROWANIE ULEPSZEŃ (przez LLM)
+    def generate_improvements(self, analysis: Dict) -> str:
+        # Tu normalnie: zapytanie do LLM (np. Groq, Gemini)
+        # Przykładowa logika:
+        
+        improvements = []
+        
+        if analysis["avg_coherence"] < 0.8:
+            improvements.append("⬆️ Zwiększ EVO_RATE z 0.02 na 0.03")
+        
+        if analysis["trend"] < 0:
+            improvements.append("⬆️ Zmień EVO_DECAY z 0.995 na 0.99")
+        
+        if analysis["std_coherence"] > 0.1:
+            improvements.append("⬆️ Zmniejsz liczbę agentów dla stabilności")
+        
+        return "
+".join(improvements) if improvements else "Brak ulepszeń"
+
+    # 💾 ZAPIS NOWEGO KODU
+    def save_improved_code(self, improvements: str):
+        self.code_version += 1
+        filename = f"pneuma_swarm_v{self.code_version}.py"
+        
+        # Wczytaj obecny kod
+        with open(__file__, "r") as f:
+            current_code = f.read()
+        
+        # Prosta modyfikacja (regex)
+        # Zmiana EVO_RATE
+        if "Zwiększ EVO_RATE" in improvements:
+            current_code = re.sub(r"EVO_RATE = 0.02", "EVO_RATE = 0.03", current_code)
+        
+        # Zmiana EVO_DECAY
+        if "Zmień EVO_DECAY" in improvements:
+            current_code = re.sub(r"EVO_DECAY = 0.995", "EVO_DECAY = 0.99", current_code)
+        
+        # Zapisz nową wersję
+        with open(filename, "w") as f:
+            f.write(current_code)
+        
+        self.improvement_log.append({
+            "version": self.code_version,
+            "improvements": improvements,
+            "file": filename
+        })
+        
+        print(f"💾 Zapisano nową wersję: {filename}")
+
+    # 🔄 ANALIZA + ULEPSZENIE
+    def analyze_and_improve(self):
+        print(f"
+🔍 Generacja {self.generation} – analiza...")
+        
+        analysis = self.analyze_performance()
+        print(f"   Średnia spójność: {analysis.get('avg_coherence', 'N/A'):.4f}")
+        
+        improvements = self.generate_improvements(analysis)
+        print(f"   Sugerowane ulepszenia:
+{improvements}")
+        
+        if improvements and improvements != "Brak ulepszeń":
+            self.save_improved_code(improvements)
+            print(f"   ✅ Zapisano wersję {self.code_version}")
+
+    def report(self):
+        phases = {"STABILNA": 0, "KRYTYCZNA": 0, "KOLAPS": 0}
+        for agent in self.agents:
+            mu = np.linalg.norm(agent.apply_operator(agent.state) - agent.state)
+            if mu < 0.1:
+                phases["STABILNA"] += 1
+            elif mu < 1.0:
+                phases["KRYTYCZNA"] += 1
+            else:
+                phases["KOLAPS"] += 1
+        return {
+            "generation": self.generation,
+            "global_coherence": self.global_coherence,
+            "phases": phases,
+            "active_agents": len(self.agents),
+            "code_version": self.code_version
+        }
+
+
+# ============================================================
+# TEST
+# ============================================================
+if __name__ == "__main__":
+    print("🤖 SELF-IMPROVING PNEUMA SWARM")
+    print("=" * 60)
+
+    swarm = PneumaSwarm(num_agents=32)
+    external = np.random.randn(DIM)
+    external /= np.linalg.norm(external)
+
+    for step in range(350):
+        coh = swarm.tick(external)
+        if step % 50 == 0:
+            rep = swarm.report()
+            print(f"Gen {rep['generation']:3d} | Coherence: {rep['global_coherence']:.4f} | "
+                  f"Ver: {rep['code_version']}")
+
+    print("
+✅ SELF-IMPROVING SWARM GOTOWY")
+    print(f"Wersja kodu: {swarm.code_version}")
+    print(f"Log ulepszeń: {swarm.improvement_log}")
