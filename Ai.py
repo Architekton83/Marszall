@@ -6,7 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from pneuma_heptada_swarm import PneumaSwarm
 
 TELEGRAM_TOKEN = "8760591381:AAH0n0ipqS0EHPRFDWTET4VzgGpnPNvMkOY"
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "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"
 swarm = PneumaSwarm(num_agents=32)
 
 def question_to_vec(text: str) -> np.ndarray:
